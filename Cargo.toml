@@ -1,0 +1,28 @@
+[package]
+name = "sphinx_replay_cache"
+version = "0.0.0"
+authors = ["David Stainton <dawuud@riseup.net>"]
+description = "Sphinx cryptographic packet replay writeback cache."
+homepage = "https://github.com/david415/sphinx_replay_cache"
+repository = "https://github.com/david415/sphinx_replay_cache"
+documentation = "https://docs.rs/sphinx_replay_cache/"
+readme = "README.md"
+keywords = ["cryptography", "sphinx", "mixnet", "crypto", "mix"]
+license = "AGPL-3.0-only"
+
+[dependencies]
+sphinxcrypto = "0.0.14"
+ecdh_wrapper = "0.0.7"
+rand = "^0.4.2"
+bloom = "0.3.2"
+sled = "0.16.2"
+byteorder = "1.2.6"
+log = "0.4.3"
+
+[dev-dependencies]
+rand = "^0.4.2"
+tempfile = "3.0.4"
+
+#[[bench]]
+#name = "sphinx_replay_cache_benchmark"
+#harness = false
