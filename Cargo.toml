@@ -7,7 +7,7 @@ homepage = "https://github.com/david415/sphinx_replay_cache"
 repository = "https://github.com/david415/sphinx_replay_cache"
 documentation = "https://docs.rs/sphinx_replay_cache/"
 readme = "README.md"
-keywords = ["cryptography", "sphinx", "mixnet", "crypto", "mix"]
+keywords = ["cryptography", "sphinx", "mix", "replay", "cache"]
 license = "AGPL-3.0-only"
 
 [dependencies]
