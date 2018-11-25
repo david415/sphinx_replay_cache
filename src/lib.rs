@@ -134,7 +134,7 @@ impl MixKeys {
         None
     }
 
-    pub fn shadow(&mut self, mut dst: HashMap<u64, Arc<Mutex<MixKey>>>) {
+    pub fn shadow(&mut self, dst: &mut HashMap<u64, Arc<Mutex<MixKey>>>) {
         dst.retain(|key, _value| {
             self.keys.lock().unwrap().contains_key(key)
         });
@@ -279,7 +279,14 @@ mod tests {
         let clock = epoch::Clock::new_katzenpost();
         let base_dir = TempDir::new().unwrap().path().to_str().unwrap().to_string();
         let line_rate = 128974848;
-        let mix_keys = MixKeys::new(clock, 3, base_dir, line_rate).unwrap();
+        let mut mix_keys = MixKeys::new(clock, 3, base_dir, line_rate).unwrap();
+
+        let mut local_keys: HashMap<u64, Arc<Mutex<MixKey>>> = HashMap::new();
+
+        mix_keys.shadow(&mut local_keys);
+        for (k, v) in mix_keys.keys.lock().unwrap().iter() {
+            assert!(local_keys.contains_key(&k));
+        }
     }
 
     #[test]
