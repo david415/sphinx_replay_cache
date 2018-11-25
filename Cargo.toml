@@ -18,6 +18,7 @@ bloom = "0.3.2"
 sled = "0.16.2"
 byteorder = "1.2.6"
 log = "0.4.3"
+epoch = "0.0.0"
 
 [dev-dependencies]
 rand = "^0.4.2"

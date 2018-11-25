@@ -41,12 +41,15 @@ extern crate byteorder;
 
 extern crate sphinxcrypto;
 extern crate ecdh_wrapper;
+extern crate epoch;
 
 pub mod errors;
 pub mod constants;
 
+use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use self::byteorder::{ByteOrder, LittleEndian};
 
@@ -57,6 +60,7 @@ use bloom::{ASMS,BloomFilter};
 
 use sphinxcrypto::constants::{SPHINX_REPLAY_TAG_SIZE, PACKET_SIZE};
 use ecdh_wrapper::{PublicKey, PrivateKey};
+use epoch::Clock;
 
 use errors::MixKeyError;
 use constants::MIX_KEY_FLUSH_FREQUENCY;
@@ -64,6 +68,84 @@ use constants::MIX_KEY_FLUSH_FREQUENCY;
 
 const MIX_CACHE_KEY: &str = "private_key";
 const EPOCH_KEY: &str = "epoch";
+
+
+pub struct MixKeys {
+    keys: Arc<Mutex<HashMap<u64, Arc<Mutex<MixKey>>>>>,
+    clock: Clock,
+    num_mix_keys: u8,
+    base_dir: String,
+    line_rate: u64,
+}
+
+impl MixKeys {
+    pub fn new(clock: Clock, num_mix_keys: u8, base_dir: String, line_rate: u64) -> Result<Self, MixKeyError> {
+        let mut m = MixKeys{
+            keys: Arc::new(Mutex::new(HashMap::new())),
+            clock: clock,
+            num_mix_keys: num_mix_keys,
+            base_dir: base_dir,
+            line_rate: line_rate,
+        };
+        m.init()?;
+        Ok(m)
+    }
+
+    /// Generate or load the initial set of MixKey.
+    fn init(&mut self) -> Result<(), MixKeyError> {
+        let time = self.clock.now();
+        let _ = self.generate(time.epoch)?;
+        // Clean up stale mix keys.
+        // XXX...
+        Ok(())
+    }
+
+    pub fn generate(&mut self, base_epoch: u64) -> Result<bool, MixKeyError> {
+        let mut did_generate = false;
+        for epoch in base_epoch..base_epoch+self.num_mix_keys as u64{
+            if let Some(_key) = self.keys.lock().unwrap().get(&epoch) {
+                continue
+            }
+            let key = Arc::new(Mutex::new(MixKey::new(self.line_rate, epoch, self.clock.period(), &self.base_dir)?));
+            did_generate = true;
+            self.keys.lock().unwrap().insert(epoch, key);
+        }
+        Ok(did_generate)
+    }
+
+    pub fn prune(&mut self) -> bool {
+        let mut did_prune = false;
+        let time = self.clock.now();
+        self.keys.lock().unwrap().retain(|key, _value| {
+            if *key < time.epoch - 1 {
+                did_prune = true;
+                return true
+            }
+            return false
+        });
+        did_prune
+    }
+
+    pub fn public_key(&self, epoch: u64) -> Option<PublicKey> {
+        if let Some(ref key) = self.keys.lock().unwrap().get(&epoch) {
+            let k = key.lock().unwrap().public_key();
+            return Some(k)
+        }
+        None
+    }
+
+    pub fn shadow(&mut self, mut dst: HashMap<u64, Arc<Mutex<MixKey>>>) {
+        dst.retain(|key, _value| {
+            self.keys.lock().unwrap().contains_key(key)
+        });
+        for (key, val) in self.keys.lock().unwrap().iter() {
+            if !dst.contains_key(&key) {
+                dst.insert(*key, val.clone());
+            }
+        }
+    }
+}
+
 
 
 #[derive(PartialEq, Eq, Hash)]
@@ -89,13 +171,13 @@ pub struct MixKey {
 }
 
 impl MixKey {
-    pub fn new(line_rate: u64, epoch: u64, epoch_duration: u16, base_dir: String) -> Result<MixKey, MixKeyError> {
+    pub fn new(line_rate: u64, epoch: u64, epoch_duration: u64, base_dir: &String) -> Result<MixKey, MixKeyError> {
         let false_positive_rate: f32 = 0.01;
         let expected_num_items: u32 = (line_rate as f64 / PACKET_SIZE as f64) as u32 * epoch_duration as u32;
-        let cache_capacity: usize = (((epoch_duration as u64 * line_rate) / PACKET_SIZE as u64) as usize * SPHINX_REPLAY_TAG_SIZE) / 2;
+        let cache_capacity: usize = (((epoch_duration * line_rate) / PACKET_SIZE as u64) as usize * SPHINX_REPLAY_TAG_SIZE) / 2;
 
         let cache_cfg_builder = sled::ConfigBuilder::default()
-            .path(Path::new(&base_dir).join(format!("mix_key.{}", epoch)))
+            .path(Path::new(base_dir).join(format!("mix_key.{}", epoch)))
             .cache_capacity(cache_capacity)
             .use_compression(false)
             .flush_every_ms(Some(MIX_KEY_FLUSH_FREQUENCY))
@@ -193,6 +275,14 @@ mod tests {
 
 
     #[test]
+    fn basic_mix_keys_test() {
+        let clock = epoch::Clock::new_katzenpost();
+        let base_dir = TempDir::new().unwrap().path().to_str().unwrap().to_string();
+        let line_rate = 128974848;
+        let mix_keys = MixKeys::new(clock, 3, base_dir, line_rate).unwrap();
+    }
+
+    #[test]
     fn basic_mix_key_test() {
         let cache_dir = TempDir::new().unwrap();
         {
@@ -201,7 +291,7 @@ mod tests {
             //let epoch_duration = 1 * 60 * 60; // 1 hours
             let epoch_duration = 1;
             let epoch = 1;
-            let mut mix_key = MixKey::new(128974848, epoch, epoch_duration, cache_dir_path.to_str().unwrap().to_string()).unwrap();
+            let mut mix_key = MixKey::new(128974848, epoch, epoch_duration, &cache_dir_path.to_str().unwrap().to_string()).unwrap();
             let mut rng = OsRng::new().unwrap();
             let mut raw = [0u8; SPHINX_REPLAY_TAG_SIZE];
             rng.fill_bytes(&mut raw);
@@ -216,7 +306,7 @@ mod tests {
             priv_key.load_bytes(&mix_key.private_key().to_vec()).unwrap();
             drop(mix_key);
 
-            let new_mix_key = MixKey::new(128974848, epoch, epoch_duration, cache_dir_path.to_str().unwrap().to_string()).unwrap();
+            let new_mix_key = MixKey::new(128974848, epoch, epoch_duration, &cache_dir_path.to_str().unwrap().to_string()).unwrap();
             assert_eq!(epoch, new_mix_key.epoch);
             assert_eq!(priv_key, *new_mix_key.private_key());
         }
