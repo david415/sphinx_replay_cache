@@ -70,8 +70,9 @@ const MIX_CACHE_KEY: &str = "private_key";
 const EPOCH_KEY: &str = "epoch";
 
 
+#[derive(Clone)]
 pub struct MixKeys {
-    keys: Arc<Mutex<HashMap<u64, Arc<Mutex<MixKey>>>>>,
+    keys: Arc<Mutex<HashMap<u64, MixKey>>>,
     clock: Clock,
     num_mix_keys: u8,
     base_dir: String,
@@ -106,7 +107,7 @@ impl MixKeys {
             if let Some(_key) = self.keys.lock().unwrap().get(&epoch) {
                 continue
             }
-            let key = Arc::new(Mutex::new(MixKey::new(self.line_rate, epoch, self.clock.period(), &self.base_dir)?));
+            let key = MixKey::new(self.line_rate, epoch, self.clock.period(), &self.base_dir)?;
             did_generate = true;
             self.keys.lock().unwrap().insert(epoch, key);
         }
@@ -128,13 +129,13 @@ impl MixKeys {
 
     pub fn public_key(&self, epoch: u64) -> Option<PublicKey> {
         if let Some(ref key) = self.keys.lock().unwrap().get(&epoch) {
-            let k = key.lock().unwrap().public_key();
+            let k = key.public_key();
             return Some(k)
         }
         None
     }
 
-    pub fn shadow(&mut self, dst: &mut HashMap<u64, Arc<Mutex<MixKey>>>) {
+    pub fn shadow(&mut self, dst: &mut HashMap<u64, MixKey>) {
         dst.retain(|key, _value| {
             self.keys.lock().unwrap().contains_key(key)
         });
@@ -152,6 +153,10 @@ impl MixKeys {
 pub struct Tag([u8; SPHINX_REPLAY_TAG_SIZE]);
 
 impl Tag {
+    pub fn new(tag: [u8; SPHINX_REPLAY_TAG_SIZE]) -> Self {
+        Tag(tag)
+    }
+
     fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
     }
@@ -163,9 +168,10 @@ impl Clone for Tag {
     }
 }
 
+#[derive(Clone)]
 pub struct MixKey {
-    filter: BloomFilter<RandomState, RandomState>,
-    cache: Tree,
+    filter: Arc<Mutex<BloomFilter<RandomState, RandomState>>>,
+    cache: Arc<Mutex<Tree>>,
     private_key: PrivateKey,
     epoch: u64,
 }
@@ -220,8 +226,8 @@ impl MixKey {
         }
 
         Ok(MixKey{
-            filter: BloomFilter::with_rate(false_positive_rate, expected_num_items),
-            cache: cache,
+            filter: Arc::new(Mutex::new(BloomFilter::with_rate(false_positive_rate, expected_num_items))),
+            cache: Arc::new(Mutex::new(cache)),
             private_key: private_key,
             epoch: epoch,
         })
@@ -236,20 +242,20 @@ impl MixKey {
     }
 
     pub fn is_replay(&mut self, tag: Tag) -> Result<bool, MixKeyError> {
-        let maybe_replay = self.filter.contains(&tag);
+        let maybe_replay = self.filter.lock().unwrap().contains(&tag);
         if !maybe_replay {
-            self.filter.insert(&tag);
-            if let Ok(_v) = self.cache.set(tag.to_vec(), vec![]) {
+            self.filter.lock().unwrap().insert(&tag);
+            if let Ok(_v) = self.cache.lock().unwrap().set(tag.to_vec(), vec![]) {
                 return Ok(false)
             } else {
                 return Err(MixKeyError::SledError)
             }
         }
-        if let Ok(_) = self.cache.get(&tag.0) {
+        if let Ok(_) = self.cache.lock().unwrap().get(&tag.0) {
             return Ok(true)
         } else {
-            self.filter.insert(&tag);
-            if let Ok(_v) = self.cache.set(tag.to_vec(), vec![]) {
+            self.filter.lock().unwrap().insert(&tag);
+            if let Ok(_v) = self.cache.lock().unwrap().set(tag.to_vec(), vec![]) {
                 return Ok(false)
             } else {
                 return Err(MixKeyError::SledError)
@@ -258,7 +264,7 @@ impl MixKey {
     }
 
     pub fn flush(&mut self) {
-        self.cache.flush().unwrap()
+        self.cache.lock().unwrap().flush().unwrap()
     }
 }
 
@@ -281,10 +287,10 @@ mod tests {
         let line_rate = 128974848;
         let mut mix_keys = MixKeys::new(clock, 3, base_dir, line_rate).unwrap();
 
-        let mut local_keys: HashMap<u64, Arc<Mutex<MixKey>>> = HashMap::new();
+        let mut local_keys: HashMap<u64, MixKey> = HashMap::new();
 
         mix_keys.shadow(&mut local_keys);
-        for (k, v) in mix_keys.keys.lock().unwrap().iter() {
+        for (k, _v) in mix_keys.keys.lock().unwrap().iter() {
             assert!(local_keys.contains_key(&k));
         }
     }
