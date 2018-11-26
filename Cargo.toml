@@ -1,6 +1,6 @@
 [package]
 name = "sphinx_replay_cache"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["David Stainton <dawuud@riseup.net>"]
 description = "Sphinx cryptographic packet replay writeback cache."
 homepage = "https://github.com/david415/sphinx_replay_cache"

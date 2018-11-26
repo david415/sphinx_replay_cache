@@ -18,7 +18,7 @@ See https://cypherpunks.ca/~iang/pubs/Sphinx_Oakland09.pdf
 To import `sphinx_replay_cache`, add the following to the dependencies section of
 your project's `Cargo.toml`:
 ```toml
-sphinx_replay_cache = "^0.0.0"
+sphinx_replay_cache = "^0.0.1"
 ```
 Then import the crate as:
 ```rust,no_run
